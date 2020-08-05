@@ -30,6 +30,7 @@ class GeofencingService : MethodCallHandler, JobIntentService() {
     private val queue = ArrayDeque<List<Any>>()
     private lateinit var mBackgroundChannel: MethodChannel
     private lateinit var mContext: Context
+    private lateinit var sPluginRegistrantCallback: PluginRegistrantCallback
 
     companion object {
         @JvmStatic
@@ -42,17 +43,13 @@ class GeofencingService : MethodCallHandler, JobIntentService() {
         private val sServiceStarted = AtomicBoolean(false)
 
         @JvmStatic
-        private lateinit var sPluginRegistrantCallback: PluginRegistrantCallback
-
-        @JvmStatic
         fun enqueueWork(context: Context, work: Intent) {
             enqueueWork(context, GeofencingService::class.java, JOB_ID, work)
         }
+    }
 
-        @JvmStatic
-        fun setPluginRegistrant(callback: PluginRegistrantCallback) {
-            sPluginRegistrantCallback = callback
-        }
+    private fun setPluginRegistrant(callback: PluginRegistrantCallback) {
+        sPluginRegistrantCallback = callback
     }
 
     private fun startGeofencingService(context: Context) {
@@ -73,7 +70,10 @@ class GeofencingService : MethodCallHandler, JobIntentService() {
                 sBackgroundFlutterView = FlutterNativeView(context, true)
 
                 val registry = sBackgroundFlutterView!!.pluginRegistry
-                sPluginRegistrantCallback.registerWith(registry)
+                if (::sPluginRegistrantCallback.isInitialized) {
+                    sPluginRegistrantCallback.registerWith(registry)
+                }
+
                 val args = FlutterRunArguments()
                 args.bundlePath = FlutterMain.findAppBundlePath(context)
                 args.entrypoint = callbackInfo.callbackName
@@ -85,7 +85,9 @@ class GeofencingService : MethodCallHandler, JobIntentService() {
         }
         mBackgroundChannel = MethodChannel(sBackgroundFlutterView,
                 "plugins.flutter.io/geofencing_plugin_background")
-        mBackgroundChannel.setMethodCallHandler(this)
+        if (::mBackgroundChannel.isInitialized) {
+            mBackgroundChannel.setMethodCallHandler(this)
+        }
     }
 
    override fun onMethodCall(call: MethodCall, result: Result) {
@@ -93,18 +95,24 @@ class GeofencingService : MethodCallHandler, JobIntentService() {
             "GeofencingService.initialized" -> {
                 synchronized(sServiceStarted) {
                     while (!queue.isEmpty()) {
-                        mBackgroundChannel.invokeMethod("", queue.remove())
+                        if (::mBackgroundChannel.isInitialized) {
+                            mBackgroundChannel.invokeMethod("", queue.remove())
+                        }
                     }
                     sServiceStarted.set(true)
                 }
             }
             "GeofencingService.promoteToForeground" -> {
-                mContext.startForegroundService(Intent(mContext, IsolateHolderService::class.java))
+                if (::mContext.isInitialized) {
+                    mContext.startForegroundService(Intent(mContext, IsolateHolderService::class.java))
+                }
             }
             "GeofencingService.demoteToBackground" -> {
                 val intent = Intent(mContext, IsolateHolderService::class.java)
                 intent.setAction(IsolateHolderService.ACTION_SHUTDOWN)
-                mContext.startForegroundService(intent)
+                if (::mContext.isInitialized) {
+                    mContext.startForegroundService(intent)
+                }
             }
             else -> result.notImplemented()
         }
@@ -147,7 +155,11 @@ class GeofencingService : MethodCallHandler, JobIntentService() {
                 queue.add(geofenceUpdateList)
             } else {
                 // Callback method name is intentionally left blank.
-                Handler(mContext.mainLooper).post { mBackgroundChannel.invokeMethod("", geofenceUpdateList) }
+                Handler(mContext.mainLooper).post {
+                    if (::mBackgroundChannel.isInitialized) {
+                        mBackgroundChannel.invokeMethod("", geofenceUpdateList)
+                    }
+                }
             }
         }
     }
